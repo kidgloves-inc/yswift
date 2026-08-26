@@ -1,10 +1,10 @@
-use crate::subscription::YSubscription;
+use crate::subscription::{next_observation_key, YSubscription};
 use crate::transaction::YrsTransaction;
 use crate::{change::YrsChange, error::CodingError};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::sync::Arc;
-use yrs::{types::Value, Any, Array, ArrayRef, Observable};
+use yrs::{Any, Array, ArrayRef, Observable, Out as Value};
 use yrs::branch::Branch;
 use crate::doc::YrsCollectionPtr;
 
@@ -16,8 +16,9 @@ unsafe impl Sync for YrsArray {}
 impl AsRef<Branch> for YrsArray {
     fn as_ref(&self) -> &Branch {
         //FIXME: after yrs v0.18 use logical references
-        let branch = &*self.0.borrow();
-        unsafe { std::mem::transmute(branch.as_ref()) }
+        let guard = self.0.borrow();
+        let branch: &Branch = <ArrayRef as AsRef<Branch>>::as_ref(&*guard);
+        unsafe { std::mem::transmute::<&Branch, &'static Branch>(branch) }
     }
 }
 
@@ -187,17 +188,17 @@ impl YrsArray {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsArrayObservationDelegate>) -> Arc<YSubscription> {
-        let subscription = self
-            .0
-            .borrow_mut()
-            .observe(move |transaction, text_event| {
-                let delta = text_event.delta(transaction);
-                let result: Vec<YrsChange> =
-                    delta.iter().map(|change| YrsChange::from(change)).collect();
-                delegate.call(result)
-            });
-
-            Arc::new(YSubscription::new(subscription))
+        let array = self.0.borrow().clone();
+        let key = next_observation_key();
+        array.observe_with(key.clone(), move |transaction, array_event| {
+            let delta = array_event.delta(transaction);
+            let result: Vec<YrsChange> =
+                delta.iter().map(|change| YrsChange::from(change)).collect();
+            delegate.call(result)
+        });
+        Arc::new(YSubscription::keyed(move || {
+            array.unobserve(key);
+        }))
     }
 
     pub(crate) fn to_a(&self, transaction: &YrsTransaction) -> Vec<String> {

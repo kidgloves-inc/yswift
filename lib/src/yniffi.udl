@@ -19,7 +19,18 @@ interface YrsDoc {
   YrsUndoManager undo_manager(sequence<YrsCollectionPtr> tracked_refs);
 };
 
+/// One entry of a document's state vector: the highest clock seen for a client.
+dictionary YrsClientState {
+    u64 client_id;
+    u32 clock;
+};
+
 interface YrsTransaction {
+  /// The state vector as (client id, clock) pairs. `transaction_state_vector`
+  /// hands back the same information encoded; this is the decoded view, so a
+  /// caller can check which client a document credits without a decoder of its
+  /// own. Client ids are 53-bit since yrs 0.27 (yjs v14 compatible).
+  sequence<YrsClientState> transaction_client_states();
   [Throws=CodingError]
   void transaction_apply_update(sequence<u8> update);
 
@@ -163,14 +174,10 @@ interface YrsUndoManager {
 
     /// Undoes the last operation, pushing it onto redo stack, returning false if undo
     /// stack was empty an method had no effect.
-    /// Fails to execute if there's another transaction in progress.
-    [Throws=YrsUndoError]
     boolean undo();
 
     /// Redoes the last operation from undo stack, returning false if redo stack was
     /// empty an method had no effect.
-    /// Fails to execute if there's another transaction in progress.
-    [Throws=YrsUndoError]
     boolean redo();
 
     /// Wraps a set of recent changes together into a single undo operation. These
@@ -178,7 +185,6 @@ interface YrsUndoManager {
     void wrap_changes();
 
     /// Clears the undo/redo stacks of a current undo manager.
-    [Throws=YrsUndoError]
     void clear();
 
     YSubscription observe_added(YrsUndoManagerObservationDelegate delegate);
@@ -186,11 +192,6 @@ interface YrsUndoManager {
     YSubscription observe_updated(YrsUndoManagerObservationDelegate delegate);
 
     YSubscription observe_popped(YrsUndoManagerObservationDelegate delegate);
-};
-
-[Error]
-enum YrsUndoError {
-  "PendingTransaction"
 };
 
 callback interface YrsUndoManagerObservationDelegate {

@@ -1,6 +1,6 @@
 use crate::attrs::YrsAttrs;
 use crate::delta::YrsDelta;
-use crate::subscription::YSubscription;
+use crate::subscription::{next_observation_key, YSubscription};
 use crate::transaction::YrsTransaction;
 use yrs::Any;
 use std::cell::RefCell;
@@ -18,8 +18,9 @@ unsafe impl Sync for YrsText {}
 impl AsRef<Branch> for YrsText {
     fn as_ref(&self) -> &Branch {
         //FIXME: after yrs v0.18 use logical references
-        let branch = &*self.0.borrow();
-        unsafe { std::mem::transmute(branch.as_ref()) }
+        let guard = self.0.borrow();
+        let branch: &Branch = <TextRef as AsRef<Branch>>::as_ref(&*guard);
+        unsafe { std::mem::transmute::<&Branch, &'static Branch>(branch) }
     }
 }
 
@@ -134,16 +135,16 @@ impl YrsText {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsTextObservationDelegate>) -> Arc<YSubscription> {
-        let subscription = self
-            .0
-            .borrow_mut()
-            .observe(move |transaction, text_event| {
-                let delta = text_event.delta(transaction);
-                let result: Vec<YrsDelta> =
-                    delta.iter().map(|change| YrsDelta::from(change)).collect();
-                delegate.call(result)
-            });
-
-            Arc::new(YSubscription::new(subscription))
+        let text = self.0.borrow().clone();
+        let key = next_observation_key();
+        text.observe_with(key.clone(), move |transaction, text_event| {
+            let delta = text_event.delta(transaction);
+            let result: Vec<YrsDelta> =
+                delta.iter().map(|change| YrsDelta::from(change)).collect();
+            delegate.call(result)
+        });
+        Arc::new(YSubscription::keyed(move || {
+            text.unobserve(key);
+        }))
     }
 }
