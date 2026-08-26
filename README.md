@@ -16,6 +16,17 @@ To build the package from source, you need both Rust and XCode installed.
 The GitHub releases should include versioned links to the `yniffiFFI`.
 Development releases expect that you will build you own local copy using `./scripts/build-xcframework.sh`.
 
+## Releasing (this fork)
+
+```bash
+./scripts/release.sh <version>    # e.g. 0.3.0-kidgloves.1
+```
+
+Builds the XCFramework, points `Package.swift` at the GitHub release it is
+about to create, commits, tags, pushes and publishes with `gh`. The repository
+has to stay public: `binaryTarget` URLs are fetched unauthenticated. Why this
+fork exists and what it changes is the 2026-08-26 entry in `devnotes/DevLog.md`.
+
 ## Decision log
 
 This project maintains a [decision log](./devnotes/DevLog.md).

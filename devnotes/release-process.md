@@ -1,5 +1,11 @@
 # GitHub oriented Swift package release process
 
+On this fork the whole sequence below is one command, `./scripts/release.sh <version>`
+(bare semver, e.g. `0.3.0-kidgloves.1`), which builds the XCFramework, rewrites
+`Package.swift`'s binary target to the release URL and checksum, commits, tags,
+pushes and publishes the GitHub release with the zip attached. The steps stay
+documented here so the script can be read against them.
+
 Release process:
 
 Check out the latest code, or at the mark you want to release.

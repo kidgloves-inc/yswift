@@ -1,5 +1,74 @@
 # Decision log
 
+## 2026-08-26
+
+### kidgloves-inc fork: yrs 0.27.4, 53-bit client ids
+
+This tree is `kidgloves-inc/yswift`, forked from `y-crdt/yswift` at `d22bde0`
+(the 0.2.1 release, July 2024). It exists because upstream is dormant — no
+commit since 2024-07-20, and issue #53 / PR #54 (May 2026, a production user
+offering to contribute) have had no maintainer response — while the core it
+pins, `yrs 0.18.2`, is on the wrong side of a wire-format break.
+
+`yrs` 0.18 declared `ClientID = u64` and *encoded* it as a 64-bit varint, but
+`DecoderV1::read_client` decoded it into a `u32`. Every peer on `yrs` ≥ 0.26
+(y-crdt PR #612 "Client 53bit", merged 2026-05-04) or Yjs ≥ 14 generates
+53-bit ids by default, so an update from such a peer applied through yswift
+0.2.1 lands under a silently truncated author. No error, no warning: the
+document forks and the fork surfaces days later. kidgloves hit this in
+production (fourteen boards) with `pycrdt` on the other side; another
+production user, `zshannon/yswift`, hit the same bug and patched a git fork of
+`yrs` 0.25 (`fix/client-id-u64-truncation`) rather than crossing the 0.26
+line. That fork was read as reference here — its `sync`-feature shapes were
+useful — but nothing was taken from it without checking against stock 0.27.4
+signatures.
+
+What changed to get onto `yrs = { version = "0.27.4", features = ["sync"] }`:
+
+- `yrs::types::Value` became private; the crate exports `yrs::Out`, imported
+  here as `Out as Value` so the match arms stay readable.
+- `TransactionMut::apply_update` returns `Result<(), UpdateError>` instead of
+  panicking; it maps to `CodingError::DecodingError`.
+- `UndoManager::new()` takes no document, and `expand_scope` takes `&Doc` —
+  undo managers span documents now — so `YrsUndoManager` holds a `Doc` clone.
+  `undo`/`redo` are `async`; the `_blocking` forms are used, and they wait for
+  exclusive store access rather than failing, so `YrsUndoError::PendingTransaction`
+  has no source any more and `undo`/`redo`/`clear` stop throwing on the Swift
+  side. The cost is documented on `YUndoManager.undo()`: an undo issued from
+  inside a transaction on the same document deadlocks instead of throwing.
+  `clear` is `clear_all`. Observers take `&mut self`.
+- `AsRef<Branch>` is implemented for several types now, so the `'static`
+  branch transmutes name the impl explicitly.
+- Dropping a yrs `Subscription` no longer removes the callback; it queues the
+  removal for the observer's next trigger, so a cancelled closure stayed
+  alive until the next event and three leak tests went red. The shared types
+  now observe under a key (`observe_with`) and `YSubscription` unobserves by
+  that key on drop, which removes the callback at once. The undo manager's
+  observers still use yrs's own `Subscription`.
+- One addition to the UDL, `YrsTransaction.transaction_client_states()`: the
+  state vector as `(client_id, clock)` pairs. `transaction_state_vector` hands
+  back the same thing encoded; this is what lets a caller check WHICH client
+  a document credits an update to, which is the whole question here.
+- `Cargo.lock` is committed: `scripts/build-xcframework.sh` builds with
+  `--locked`, and a release must be reproducible from the tree.
+- Upstream PR #54 (`diff(from: [])` treated as "full state" instead of a
+  decoder panic, by Mike / `appymichael`) is folded in with its tests.
+
+Deliberately not done here: `small-client` (the 32-bit compatibility flag —
+the opposite of the goal), the `uniffi` 0.29+ move (removes
+`UniffiCustomTypeConverter`, used in `doc.rs`; an unforced bump in a
+migration hides its real cost), and `thiserror` 2.
+
+A `#[test]` in `lib/src/doc.rs` applies an update authored by the incident's
+53-bit id (`967714667641833`) and asserts the peer credits exactly that id,
+not its `u32` truncation.
+
+Release: `scripts/release.sh <version>` builds the XCFramework, rewrites
+`Package.swift`'s binary target to this repo's release URL and checksum,
+commits, tags and publishes the GitHub release with the zip attached. The
+repository must stay public: SwiftPM, rules_swift_package_manager and CI all
+fetch `binaryTarget` URLs unauthenticated.
+
 ## 2023-01-19
 
 ### Passing complex types as `String`s through Uniffi bridging
