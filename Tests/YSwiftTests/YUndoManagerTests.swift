@@ -58,10 +58,10 @@ class YUndoManagerTests: XCTestCase {
         
         XCTAssertEqual(text.getString(), "123321")
         
-        XCTAssert (try manager.undo())
+        XCTAssert (manager.undo())
         XCTAssertEqual(text.getString(), "12321")
         
-        XCTAssert (try manager.undo())
+        XCTAssert (manager.undo())
         XCTAssertEqual(text.getString(), "1221")
         
         text.insert("3", at: 2)
@@ -83,10 +83,10 @@ class YUndoManagerTests: XCTestCase {
         
         text.insert("abc", at: 0)
         
-        XCTAssert (try manager.undo())
+        XCTAssert (manager.undo())
         XCTAssertEqual(received.value, "A")
         
-        XCTAssert (try manager.redo())
+        XCTAssert (manager.redo())
         XCTAssertEqual(received.value, "A")
         
         on_added.cancel()
@@ -122,15 +122,15 @@ class YUndoManagerTests: XCTestCase {
         XCTAssertEqual(text.getString(), "h<break>ello world")
         XCTAssertEqual(remoteText.getString(), "h<break>ello world")
         
-        XCTAssertTrue (try manager.undo())
+        XCTAssertTrue (manager.undo())
         
         // only changes marked locally have been reversed
         XCTAssertEqual(text.getString(), "h<break>ello")
         
-        XCTAssertTrue (try manager.undo())
+        XCTAssertTrue (manager.undo())
         XCTAssertEqual(text.getString(), "<break>")
         
-        XCTAssertFalse(try manager.undo()) // remote changes are not reverted
+        XCTAssertFalse(manager.undo()) // remote changes are not reverted
         XCTAssertEqual(text.getString(), "<break>")
     }
 }
