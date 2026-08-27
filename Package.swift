@@ -50,8 +50,8 @@ if ProcessInfo.processInfo.environment["YSWIFT_LOCAL"] != nil {
 } else {
     FFIbinaryTarget = .binaryTarget(
             name: "yniffiFFI",
-            url: "https://github.com/kidgloves-inc/yswift/releases/download/0.3.0-kidgloves.2/yniffiFFI.xcframework.zip",
-            checksum: "954af438c94811d43c7af0935faa9cf664757071b08affb456117fc29ee9aedc"
+            url: "https://github.com/kidgloves-inc/yswift/releases/download/0.3.0-kidgloves.3/yniffiFFI.xcframework.zip",
+            checksum: "416c1d2fd92a4a47b1bd3f697ae4453a54e611c9da47ee926d76324cd1469916"
     )
 }
 
