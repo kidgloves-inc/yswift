@@ -58,7 +58,7 @@ class YSubscriptionTests: XCTestCase {
     /// collection it observed can both be released first (a view model's
     /// stored properties go in an order nobody chose). Cancelling it then must
     /// not reach into a freed store — it did once, as a SIGSEGV in
-    /// `Branch::unobserve` on every WhiteboardDocument deinit in the app.
+    /// `Branch::unobserve` on every deinit of a consuming app's document wrapper.
     func test_cancelling_after_the_document_is_gone_is_safe() {
         var document: YDocument? = YDocument()
         var text: YText? = document!.getOrCreateText(named: "prompt")

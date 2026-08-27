@@ -15,8 +15,8 @@ pins, `yrs 0.18.2`, is on the wrong side of a wire-format break.
 (y-crdt PR #612 "Client 53bit", merged 2026-05-04) or Yjs ≥ 14 generates
 53-bit ids by default, so an update from such a peer applied through yswift
 0.2.1 lands under a silently truncated author. No error, no warning: the
-document forks and the fork surfaces days later. kidgloves hit this in
-production (fourteen boards) with `pycrdt` on the other side; another
+document forks and the fork surfaces days later. We hit this in production
+with `pycrdt` on the other side; another
 production user, `zshannon/yswift`, hit the same bug and patched a git fork of
 `yrs` 0.25 (`fix/client-id-u64-truncation`) rather than crossing the 0.26
 line. That fork was read as reference here — its `sync`-feature shapes were
@@ -48,8 +48,8 @@ What changed to get onto `yrs = { version = "0.27.4", features = ["sync"] }`:
   That unobserve walks the branch through a raw `BranchPtr`, and a
   subscription can be the last thing standing — a view model releases its
   document, its text and its subscription in an order nobody chose — so the
-  first cut segfaulted in `Branch::unobserve` on every `WhiteboardDocument`
-  deinit in the app while the package's own tests stayed green. Each shared
+  first cut segfaulted in `Branch::unobserve` on every deinit of the app's
+  document wrapper while the package's own tests stayed green. Each shared
   type wrapper (`YrsText`, `YrsArray`, `YrsMap`) now carries a clone of its
   `Doc`, and the unobserve closure captures it, so the store outlives anything
   that can reach into it. `YSubscriptionTests.test_cancelling_after_the_document_is_gone_is_safe`
