@@ -1,55 +1,58 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use yrs::{Origin, Subscription};
+use std::sync::{Arc, Mutex};
+use yrs::Subscription;
+
+/// The delegate a yrs callback forwards to, behind a slot the subscription can
+/// empty. Cloned out of the lock before each call so a delegate that cancels
+/// its own subscription from inside the callback does not deadlock.
+pub(crate) type DelegateSlot<D> = Arc<Mutex<Option<Arc<D>>>>;
+
+pub(crate) fn delegate_slot<D: ?Sized>(delegate: Box<D>) -> DelegateSlot<D> {
+    Arc::new(Mutex::new(Some(Arc::from(delegate))))
+}
+
+pub(crate) fn delegate_of<D: ?Sized>(slot: &DelegateSlot<D>) -> Option<Arc<D>> {
+    slot.lock().unwrap().clone()
+}
 
 /// Ends an observation when dropped.
 ///
-/// Two shapes. yrs's own [Subscription] only *queues* its removal since 0.27 —
-/// the observer drops the callback on its next trigger — so a cancelled closure
-/// would stay alive until the next event on that type. The shared types
-/// therefore observe under a key of ours and unobserve by that key, which
-/// removes the callback at once (`YTextTests.test_closure_observation_IsNotLeakingAfterUnobserving`
-/// and its array/map twins pin this).
+/// Since yrs 0.27 dropping a [Subscription] only *queues* the callback's
+/// removal — the observer applies it on its next trigger, through a weak
+/// handle that is safe even if the document is already gone — so the closure
+/// itself would live until the next event on that type. What a caller
+/// actually needs released at once is the delegate it handed in, so the
+/// subscription empties that delegate's slot on drop and lets yrs retire the
+/// (now inert) callback at its own pace.
 pub(crate) struct YSubscription {
-    inner: Mutex<Option<Inner>>,
-}
-
-enum Inner {
-    Deferred(#[allow(dead_code)] Subscription),
-    Keyed(Box<dyn FnOnce() + Send>),
+    _inner: Subscription,
+    release: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl YSubscription {
-    pub(crate) fn new(value: Subscription) -> YSubscription {
+    pub(crate) fn new(inner: Subscription) -> YSubscription {
         YSubscription {
-            inner: Mutex::new(Some(Inner::Deferred(value))),
+            _inner: inner,
+            release: Mutex::new(None),
         }
     }
 
-    pub(crate) fn keyed<F>(unobserve: F) -> YSubscription
-    where
-        F: FnOnce() + Send + 'static,
-    {
+    pub(crate) fn with_delegate<D: ?Sized + Send + Sync + 'static>(
+        inner: Subscription,
+        slot: DelegateSlot<D>,
+    ) -> YSubscription {
         YSubscription {
-            inner: Mutex::new(Some(Inner::Keyed(Box::new(unobserve)))),
+            _inner: inner,
+            release: Mutex::new(Some(Box::new(move || {
+                slot.lock().unwrap().take();
+            }))),
         }
     }
 }
 
 impl Drop for YSubscription {
     fn drop(&mut self) {
-        let taken = self.inner.get_mut().map(Option::take).unwrap_or(None);
-        match taken {
-            Some(Inner::Keyed(unobserve)) => unobserve(),
-            // Dropping the yrs Subscription queues its removal.
-            Some(Inner::Deferred(_)) | None => {}
+        if let Some(release) = self.release.get_mut().map(Option::take).unwrap_or(None) {
+            release();
         }
     }
-}
-
-/// A process-unique observation key. Keys only need to be distinct within one
-/// observer, so one counter for all of them is more than enough.
-pub(crate) fn next_observation_key() -> Origin {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    Origin::from(NEXT.fetch_add(1, Ordering::Relaxed))
 }

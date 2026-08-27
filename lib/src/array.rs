@@ -1,4 +1,4 @@
-use crate::subscription::{next_observation_key, YSubscription};
+use crate::subscription::{delegate_of, delegate_slot, YSubscription};
 use crate::transaction::YrsTransaction;
 use crate::{change::YrsChange, error::CodingError};
 use std::cell::RefCell;
@@ -7,12 +7,8 @@ use std::sync::Arc;
 use yrs::{Any, Array, ArrayRef, Observable, Out as Value};
 use yrs::branch::Branch;
 use crate::doc::YrsCollectionPtr;
-use yrs::Doc;
 
-/// The shared type and the document it lives in. Holding the `Doc` keeps its
-/// store alive for as long as anything can reach into it through this wrapper
-/// — including a keyed subscription's `unobserve`, which walks the branch.
-pub(crate) struct YrsArray(RefCell<ArrayRef>, Doc);
+pub(crate) struct YrsArray(RefCell<ArrayRef>);
 
 unsafe impl Send for YrsArray {}
 unsafe impl Sync for YrsArray {}
@@ -26,9 +22,9 @@ impl AsRef<Branch> for YrsArray {
     }
 }
 
-impl YrsArray {
-    pub(crate) fn new(doc: Doc, value: ArrayRef) -> Self {
-        YrsArray(RefCell::from(value), doc)
+impl From<ArrayRef> for YrsArray {
+    fn from(value: ArrayRef) -> Self {
+        YrsArray(RefCell::from(value))
     }
 }
 pub(crate) trait YrsArrayEachDelegate: Send + Sync + Debug {
@@ -192,19 +188,17 @@ impl YrsArray {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsArrayObservationDelegate>) -> Arc<YSubscription> {
-        let array = self.0.borrow().clone();
-        let doc = self.1.clone();
-        let key = next_observation_key();
-        array.observe_with(key.clone(), move |transaction, array_event| {
+        let slot = delegate_slot(delegate);
+        let callback_slot = slot.clone();
+        let subscription = self.0.borrow().observe(move |transaction, array_event| {
             let delta = array_event.delta(transaction);
             let result: Vec<YrsChange> =
                 delta.iter().map(|change| YrsChange::from(change)).collect();
-            delegate.call(result)
+            if let Some(delegate) = delegate_of(&callback_slot) {
+                delegate.call(result)
+            }
         });
-        Arc::new(YSubscription::keyed(move || {
-            array.unobserve(key);
-            drop(doc);
-        }))
+        Arc::new(YSubscription::with_delegate(subscription, slot))
     }
 
     pub(crate) fn to_a(&self, transaction: &YrsTransaction) -> Vec<String> {

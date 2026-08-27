@@ -40,20 +40,17 @@ What changed to get onto `yrs = { version = "0.27.4", features = ["sync"] }`:
 - `AsRef<Branch>` is implemented for several types now, so the `'static`
   branch transmutes name the impl explicitly.
 - Dropping a yrs `Subscription` no longer removes the callback; it queues the
-  removal for the observer's next trigger, so a cancelled closure stayed
-  alive until the next event and three leak tests went red. The shared types
-  now observe under a key (`observe_with`) and `YSubscription` unobserves by
-  that key on drop, which removes the callback at once. The undo manager's
-  observers still use yrs's own `Subscription`.
-  That unobserve walks the branch through a raw `BranchPtr`, and a
-  subscription can be the last thing standing — a view model releases its
-  document, its text and its subscription in an order nobody chose — so the
-  first cut segfaulted in `Branch::unobserve` on every deinit of the app's
-  document wrapper while the package's own tests stayed green. Each shared
-  type wrapper (`YrsText`, `YrsArray`, `YrsMap`) now carries a clone of its
-  `Doc`, and the unobserve closure captures it, so the store outlives anything
-  that can reach into it. `YSubscriptionTests.test_cancelling_after_the_document_is_gone_is_safe`
-  pins it, and crashed with signal 11 before the change.
+  removal for the observer's next trigger, through a weak handle that is safe
+  even if the document is already gone. So the closure yrs holds lives until
+  the next event on that type, and three leak tests went red. What a caller
+  needs released at once is the delegate it handed in, not yrs's callback:
+  each observation keeps the delegate in a slot the subscription empties on
+  drop, and the callback becomes inert until yrs retires it. (A first cut
+  removed the callback eagerly by key through `unobserve`, which walks the
+  branch via a raw pointer and segfaulted whenever a consuming app released
+  its document before its subscription — the package's own tests never did;
+  `YSubscriptionTests.test_cancelling_after_the_document_is_gone_is_safe`
+  now does.)
 - One addition to the UDL, `YrsTransaction.transaction_client_states()`: the
   state vector as `(client_id, clock)` pairs. `transaction_state_vector` hands
   back the same thing encoded; this is what lets a caller check WHICH client

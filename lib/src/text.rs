@@ -1,6 +1,6 @@
 use crate::attrs::YrsAttrs;
 use crate::delta::YrsDelta;
-use crate::subscription::{next_observation_key, YSubscription};
+use crate::subscription::{delegate_of, delegate_slot, YSubscription};
 use crate::transaction::YrsTransaction;
 use yrs::Any;
 use std::cell::RefCell;
@@ -9,12 +9,8 @@ use std::sync::Arc;
 use yrs::{GetString, Observable, Text, TextRef};
 use yrs::branch::Branch;
 use crate::doc::YrsCollectionPtr;
-use yrs::Doc;
 
-/// The shared type and the document it lives in. Holding the `Doc` keeps its
-/// store alive for as long as anything can reach into it through this wrapper
-/// — including a keyed subscription's `unobserve`, which walks the branch.
-pub(crate) struct YrsText(RefCell<TextRef>, Doc);
+pub(crate) struct YrsText(RefCell<TextRef>);
 
 unsafe impl Send for YrsText {}
 unsafe impl Sync for YrsText {}
@@ -28,9 +24,9 @@ impl AsRef<Branch> for YrsText {
     }
 }
 
-impl YrsText {
-    pub(crate) fn new(doc: Doc, value: TextRef) -> Self {
-        YrsText(RefCell::from(value), doc)
+impl From<TextRef> for YrsText {
+    fn from(value: TextRef) -> Self {
+        YrsText(RefCell::from(value))
     }
 }
 
@@ -139,18 +135,16 @@ impl YrsText {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsTextObservationDelegate>) -> Arc<YSubscription> {
-        let text = self.0.borrow().clone();
-        let doc = self.1.clone();
-        let key = next_observation_key();
-        text.observe_with(key.clone(), move |transaction, text_event| {
+        let slot = delegate_slot(delegate);
+        let callback_slot = slot.clone();
+        let subscription = self.0.borrow().observe(move |transaction, text_event| {
             let delta = text_event.delta(transaction);
             let result: Vec<YrsDelta> =
                 delta.iter().map(|change| YrsDelta::from(change)).collect();
-            delegate.call(result)
+            if let Some(delegate) = delegate_of(&callback_slot) {
+                delegate.call(result)
+            }
         });
-        Arc::new(YSubscription::keyed(move || {
-            text.unobserve(key);
-            drop(doc);
-        }))
+        Arc::new(YSubscription::with_delegate(subscription, slot))
     }
 }

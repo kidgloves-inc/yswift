@@ -40,17 +40,17 @@ impl YrsDoc {
 
     pub(crate) fn get_text(&self, name: String) -> Arc<YrsText> {
         let text_ref = self.0.borrow().get_or_insert_text(name.as_str());
-        Arc::from(YrsText::new(self.0.borrow().clone(), text_ref))
+        Arc::from(YrsText::from(text_ref))
     }
 
     pub(crate) fn get_array(&self, name: String) -> Arc<YrsArray> {
         let array_ref: ArrayRef = self.0.borrow().get_or_insert_array(name.as_str()).into();
-        Arc::from(YrsArray::new(self.0.borrow().clone(), array_ref))
+        Arc::from(YrsArray::from(array_ref))
     }
 
     pub(crate) fn get_map(&self, name: String) -> Arc<YrsMap> {
         let map_ref: MapRef = self.0.borrow().get_or_insert_map(name.as_str()).into();
-        Arc::from(YrsMap::new(self.0.borrow().clone(), map_ref))
+        Arc::from(YrsMap::from(map_ref))
     }
 
     pub(crate) fn transact<'doc>(&self, origin: Option<YrsOrigin>) -> Arc<YrsTransaction> {
@@ -169,12 +169,16 @@ mod tests {
         }
         let txn = peer.transact();
         assert_eq!(peer_text.get_string(&txn), "hello");
+        // Compare the raw ids the peer holds, not lookups through ClientID::new —
+        // under `small-client` that constructor truncates the key too, and a lookup
+        // would find the truncated block and pass for the wrong reason.
+        let credited = |sv: &StateVector| -> Vec<(u64, u32)> {
+            sv.iter().map(|(client, clock)| (client.get(), *clock)).collect()
+        };
         let sv = txn.state_vector();
-        assert_eq!(sv.get(&ClientID::new(author)), 5, "the block is credited to the 53-bit author");
-        assert_eq!(sv.get(&ClientID::new(author & u32::MAX as u64)), 0, "and not to its u32 truncation");
+        assert_eq!(credited(&sv), vec![(author, 5)], "the block is credited to the 53-bit author");
         // Re-encoding must carry the same id back out.
-        let sv_bytes = sv.encode_v1();
-        let decoded = StateVector::decode_v1(&sv_bytes).unwrap();
-        assert_eq!(decoded.get(&ClientID::new(author)), 5);
+        let decoded = StateVector::decode_v1(&sv.encode_v1()).unwrap();
+        assert_eq!(credited(&decoded), vec![(author, 5)]);
     }
 }

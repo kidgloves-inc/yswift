@@ -1,6 +1,6 @@
 use crate::error::CodingError;
 use crate::mapchange::{YrsEntryChange, YrsMapChange};
-use crate::subscription::{next_observation_key, YSubscription};
+use crate::subscription::{delegate_of, delegate_slot, YSubscription};
 use crate::transaction::YrsTransaction;
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -9,12 +9,8 @@ use yrs::branch::Branch;
 use yrs::Observable;
 use yrs::{Any, Map, MapRef, Out as Value};
 use crate::doc::YrsCollectionPtr;
-use yrs::Doc;
 
-/// The shared type and the document it lives in. Holding the `Doc` keeps its
-/// store alive for as long as anything can reach into it through this wrapper
-/// — including a keyed subscription's `unobserve`, which walks the branch.
-pub(crate) struct YrsMap(RefCell<MapRef>, Doc);
+pub(crate) struct YrsMap(RefCell<MapRef>);
 
 // Marks that this type can be transferred across thread boundaries.
 unsafe impl Send for YrsMap {}
@@ -32,9 +28,9 @@ impl AsRef<Branch> for YrsMap {
 
 // Provides the implementation for the From trait, supporting
 // converting from a MapRef type into a YrsMap type.
-impl YrsMap {
-    pub(crate) fn new(doc: Doc, value: MapRef) -> Self {
-        YrsMap(RefCell::from(value), doc)
+impl From<MapRef> for YrsMap {
+    fn from(value: MapRef) -> Self {
+        YrsMap(RefCell::from(value))
     }
 }
 
@@ -277,10 +273,9 @@ impl YrsMap {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsMapObservationDelegate>) -> Arc<YSubscription> {
-        let map = self.0.borrow().clone();
-        let doc = self.1.clone();
-        let key = next_observation_key();
-        map.observe_with(key.clone(), move |transaction, map_event| {
+        let slot = delegate_slot(delegate);
+        let callback_slot = slot.clone();
+        let subscription = self.0.borrow().observe(move |transaction, map_event| {
             let delta = map_event.keys(transaction);
             let result: Vec<YrsMapChange> = delta
                 .iter()
@@ -289,12 +284,11 @@ impl YrsMap {
                     change: YrsEntryChange::from(val.1),
                 })
                 .collect();
-            delegate.call(result)
+            if let Some(delegate) = delegate_of(&callback_slot) {
+                delegate.call(result)
+            }
         });
-        Arc::new(YSubscription::keyed(move || {
-            map.unobserve(key);
-            drop(doc);
-        }))
+        Arc::new(YSubscription::with_delegate(subscription, slot))
     }
 }
 
