@@ -30,28 +30,9 @@ public final class YDocument {
     ///   - state: A data buffer from another YSwift document. Defaults to `[]`, meaning "full state".
     /// - Returns: A buffer that contains the diff you can use to synchronize another YSwift document.
     public func diff(txn: YrsTransaction, from state: [UInt8] = []) -> [UInt8] {
-        // The underlying Yniffi binding's `encodeDiffV1` decoder
-        // rejects a literal empty `[UInt8]` state vector with
-        // `Yniffi.CodingError.DecodingError`. Semantically the caller
-        // is asking for "diff from nothing" — i.e. the full document
-        // state. We synthesise that by getting the state vector of a
-        // freshly-created `YrsDoc`, which encodes the canonical
-        // zero-clients shape that the decoder accepts.
-        //
-        // Mirrors the workaround pattern downstream consumers were
-        // already using: `pair persistence ops with a fresh receiver
-        // doc's state vector`. Moving the workaround upstream so the
-        // default-argument call site Just Works.
-        let effectiveState: [UInt8]
-        if state.isEmpty {
-            let freshDoc = YrsDoc()
-            let freshTxn = freshDoc.transact(origin: nil)
-            defer { freshTxn.free() }
-            effectiveState = freshTxn.transactionStateVector()
-        } else {
-            effectiveState = state
-        }
-        return try! document.encodeDiffV1(tx: txn, stateVector: effectiveState)
+        // An empty state vector is "diff from nothing", the whole document;
+        // the binding treats an empty slice as the empty state vector.
+        return try! document.encodeDiffV1(tx: txn, stateVector: state)
     }
 
     // MARK: - Transaction methods

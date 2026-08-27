@@ -33,6 +33,12 @@ impl YrsDoc {
         let mut tx = transaction.transaction();
         let tx = tx.as_mut().unwrap();
 
+        // An empty slice means "seen nothing": the diff from the empty state
+        // vector is the whole document. The V1 decoder would reject it (a state
+        // vector always carries a client count), so it is handled here.
+        if state_vector.is_empty() {
+            return Ok(tx.encode_diff_v1(&StateVector::default()));
+        }
         StateVector::decode_v1(state_vector.borrow())
             .map_err(|_e| CodingError::DecodingError)
             .map(|sv| tx.encode_diff_v1(&sv))
@@ -136,6 +142,8 @@ impl UniffiCustomTypeConverter for YrsCollectionPtr {
 }
 #[cfg(test)]
 mod tests {
+    use crate::error::CodingError;
+    use crate::YrsDoc;
     use yrs::updates::decoder::Decode;
     use yrs::updates::encoder::Encode;
     use yrs::{ClientID, Doc, GetString, Options, ReadTxn, StateVector, Text, Transact, Update};
@@ -180,5 +188,73 @@ mod tests {
         // Re-encoding must carry the same id back out.
         let decoded = StateVector::decode_v1(&sv.encode_v1()).unwrap();
         assert_eq!(credited(&decoded), vec![(author, 5)]);
+    }
+
+    fn varint(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let byte = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(byte);
+                return;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
+    /// A syntactically valid V1 update that cannot be integrated: its one item
+    /// names another ITEM (the "h" of "hello") as its parent, and a parent has
+    /// to be a shared type. yrs reports that as UpdateError::InvalidParent, which
+    /// the binding surfaces as ApplyError — not DecodingError, the bytes were fine.
+    #[test]
+    fn an_update_that_decodes_but_cannot_integrate_is_an_apply_error() {
+        let author: u64 = 967_714_667_641_833;
+        let doc = YrsDoc::new();
+        let seed = {
+            let mut options = Options::default();
+            options.client_id = ClientID::new(author);
+            let source = Doc::with_options(options);
+            let text = source.get_or_insert_text("prompt");
+            let mut txn = source.transact_mut();
+            text.insert(&mut txn, 0, "hello");
+            txn.encode_state_as_update_v1(&StateVector::default())
+        };
+        let txn = doc.transact(None);
+        txn.transaction_apply_update(seed).unwrap();
+
+        let mut bad = Vec::new();
+        varint(1, &mut bad); // one client
+        varint(1, &mut bad); // one struct
+        varint(author, &mut bad);
+        varint(5, &mut bad); // clock after "hello"
+        bad.push(4); // item info: no origins, no parent sub, content = string
+        varint(0, &mut bad); // parent_info 0: parent is an ID, not a root name
+        varint(author, &mut bad);
+        varint(0, &mut bad); // (author, 0) is the "h" item
+        varint(1, &mut bad);
+        bad.push(b'x');
+        varint(0, &mut bad); // empty delete set
+
+        assert!(matches!(
+            txn.transaction_apply_update(bad),
+            Err(CodingError::ApplyError)
+        ));
+        assert!(matches!(
+            txn.transaction_apply_update(vec![0xff, 0xff, 0xff]),
+            Err(CodingError::DecodingError)
+        ));
+        txn.free();
+    }
+
+    #[test]
+    fn an_empty_state_vector_diffs_the_whole_document() {
+        let doc = YrsDoc::new();
+        let text = doc.get_text("prompt".into());
+        let txn = doc.transact(None);
+        text.insert(&txn, 0, "hello".into());
+        let whole = doc.encode_diff_v1(&txn, vec![]).unwrap();
+        let from_zero = doc.encode_diff_v1(&txn, vec![0]).unwrap(); // encoded empty sv
+        assert_eq!(whole, from_zero);
+        txn.free();
     }
 }

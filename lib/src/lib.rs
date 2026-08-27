@@ -32,6 +32,7 @@ use crate::transaction::YrsClientState;
 use crate::transaction::YrsTransaction;
 use crate::undo::YrsUndoManager;
 use crate::undo::YrsUndoManagerObservationDelegate;
+use crate::undo::YrsUndoError;
 use crate::undo::YrsUndoEvent;
 use crate::undo::YrsUndoEventKind;
 use crate::subscription::YSubscription;
