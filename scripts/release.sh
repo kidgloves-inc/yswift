@@ -52,7 +52,7 @@ echo "▸ Package.swift → $DOWNLOAD_URL ($CHECKSUM)"
 git add Package.swift lib/swift/scaffold/
 git commit -m "Release $VERSION"
 git tag "$VERSION"
-git push origin "$BRANCH" --tags
+git push origin "$BRANCH" "refs/tags/$VERSION"   # this tag only — never --tags
 
 gh release create "$VERSION" --repo "$REPO" --title "$VERSION" \
     --notes "yswift $VERSION — see devnotes/DevLog.md for what this fork changes." \
