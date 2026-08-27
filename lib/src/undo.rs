@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex, MutexGuard};
 use yrs::undo::EventKind;
+use yrs::Transact;
 use crate::doc::{YrsCollectionPtr, YrsOrigin};
 use crate::subscription::YSubscription;
 
@@ -48,19 +49,37 @@ impl YrsUndoManager {
         m.expand_scope(&self.doc, &tracked_ref);
     }
 
-    pub(crate) fn undo(&self) -> bool {
-        let mut m = self.acquire_lock();
-        m.undo_blocking()
+    /// yrs 0.27's undo manager waits for exclusive access to the store rather
+    /// than failing, so an undo issued while a transaction is open on the same
+    /// document would deadlock. Probing for a transaction first restores the
+    /// pre-0.27 contract: a pending transaction is an error, not a hang.
+    fn ensure_no_pending_transaction(&self) -> Result<(), YrsUndoError> {
+        match self.doc.try_transact_mut() {
+            Ok(txn) => {
+                drop(txn);
+                Ok(())
+            }
+            Err(_) => Err(YrsUndoError::PendingTransaction),
+        }
     }
 
-    pub(crate) fn redo(&self) -> bool {
+    pub(crate) fn undo(&self) -> Result<bool, YrsUndoError> {
+        self.ensure_no_pending_transaction()?;
         let mut m = self.acquire_lock();
-        m.redo_blocking()
+        Ok(m.undo_blocking())
     }
 
-    pub(crate) fn clear(&self) {
+    pub(crate) fn redo(&self) -> Result<bool, YrsUndoError> {
+        self.ensure_no_pending_transaction()?;
         let mut m = self.acquire_lock();
-        m.clear_all()
+        Ok(m.redo_blocking())
+    }
+
+    pub(crate) fn clear(&self) -> Result<(), YrsUndoError> {
+        self.ensure_no_pending_transaction()?;
+        let mut m = self.acquire_lock();
+        m.clear_all();
+        Ok(())
     }
 
     pub(crate) fn wrap_changes(&self) {
@@ -91,6 +110,12 @@ impl YrsUndoManager {
         });
         Arc::new(YSubscription::new(subscription))
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum YrsUndoError {
+    #[error("Operations failed - there's already an active transaction on a current document")]
+    PendingTransaction,
 }
 
 pub(crate) trait YrsUndoManagerObservationDelegate: Send + Sync + Debug {

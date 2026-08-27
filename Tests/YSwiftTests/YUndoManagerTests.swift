@@ -58,10 +58,10 @@ class YUndoManagerTests: XCTestCase {
         
         XCTAssertEqual(text.getString(), "123321")
         
-        XCTAssert (manager.undo())
+        XCTAssert (try manager.undo())
         XCTAssertEqual(text.getString(), "12321")
         
-        XCTAssert (manager.undo())
+        XCTAssert (try manager.undo())
         XCTAssertEqual(text.getString(), "1221")
         
         text.insert("3", at: 2)
@@ -83,10 +83,10 @@ class YUndoManagerTests: XCTestCase {
         
         text.insert("abc", at: 0)
         
-        XCTAssert (manager.undo())
+        XCTAssert (try manager.undo())
         XCTAssertEqual(received.value, "A")
         
-        XCTAssert (manager.redo())
+        XCTAssert (try manager.redo())
         XCTAssertEqual(received.value, "A")
         
         on_added.cancel()
@@ -122,15 +122,38 @@ class YUndoManagerTests: XCTestCase {
         XCTAssertEqual(text.getString(), "h<break>ello world")
         XCTAssertEqual(remoteText.getString(), "h<break>ello world")
         
-        XCTAssertTrue (manager.undo())
+        XCTAssertTrue (try manager.undo())
         
         // only changes marked locally have been reversed
         XCTAssertEqual(text.getString(), "h<break>ello")
         
-        XCTAssertTrue (manager.undo())
+        XCTAssertTrue (try manager.undo())
         XCTAssertEqual(text.getString(), "<break>")
         
-        XCTAssertFalse(manager.undo()) // remote changes are not reverted
+        XCTAssertFalse(try manager.undo()) // remote changes are not reverted
         XCTAssertEqual(text.getString(), "<break>")
+    }
+
+    /// yrs 0.27 has no failing undo, only one that waits for the store; an undo
+    /// issued inside a transaction on the same document must still come back
+    /// as an error, not a hang. The expectation is the timeout guard: if the
+    /// call blocks, the test fails at the wait instead of hanging the suite.
+    func test_undoInsideATransactionThrowsRatherThanHangs() {
+        let document = YDocument()
+        let text = document.getOrCreateText(named: "t")
+        let manager: YUndoManager<NSObject> = document.undoManager(trackedRefs: [text])
+        document.transactSync { txn in text.insert("a", at: 0, in: txn) }
+
+        let returned = expectation(description: "undo returned")
+        var thrown: Error?
+        DispatchQueue.global().async {
+            document.transactSync { txn in
+                text.insert("b", at: 1, in: txn)
+                do { _ = try manager.undo() } catch { thrown = error }
+            }
+            returned.fulfill()
+        }
+        wait(for: [returned], timeout: 5)
+        XCTAssertNotNil(thrown, "undo inside a transaction must throw PendingTransaction")
     }
 }
