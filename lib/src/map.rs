@@ -9,8 +9,12 @@ use yrs::branch::Branch;
 use yrs::Observable;
 use yrs::{Any, Map, MapRef, Out as Value};
 use crate::doc::YrsCollectionPtr;
+use yrs::Doc;
 
-pub(crate) struct YrsMap(RefCell<MapRef>);
+/// The shared type and the document it lives in. Holding the `Doc` keeps its
+/// store alive for as long as anything can reach into it through this wrapper
+/// — including a keyed subscription's `unobserve`, which walks the branch.
+pub(crate) struct YrsMap(RefCell<MapRef>, Doc);
 
 // Marks that this type can be transferred across thread boundaries.
 unsafe impl Send for YrsMap {}
@@ -28,9 +32,9 @@ impl AsRef<Branch> for YrsMap {
 
 // Provides the implementation for the From trait, supporting
 // converting from a MapRef type into a YrsMap type.
-impl From<MapRef> for YrsMap {
-    fn from(value: MapRef) -> Self {
-        YrsMap(RefCell::from(value))
+impl YrsMap {
+    pub(crate) fn new(doc: Doc, value: MapRef) -> Self {
+        YrsMap(RefCell::from(value), doc)
     }
 }
 
@@ -274,6 +278,7 @@ impl YrsMap {
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsMapObservationDelegate>) -> Arc<YSubscription> {
         let map = self.0.borrow().clone();
+        let doc = self.1.clone();
         let key = next_observation_key();
         map.observe_with(key.clone(), move |transaction, map_event| {
             let delta = map_event.keys(transaction);
@@ -288,6 +293,7 @@ impl YrsMap {
         });
         Arc::new(YSubscription::keyed(move || {
             map.unobserve(key);
+            drop(doc);
         }))
     }
 }

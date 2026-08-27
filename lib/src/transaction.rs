@@ -105,29 +105,26 @@ impl YrsTransaction {
     }
 
     pub(crate) fn transaction_get_text(&self, name: String) -> Option<Arc<YrsText>> {
-        self.transaction()
-            .as_ref()
-            .unwrap()
-            .get_text(name.as_str())
-            .map(YrsText::from)
+        let txn = self.transaction();
+        let txn = txn.as_ref().unwrap();
+        txn.get_text(name.as_str())
+            .map(|r| YrsText::new(txn.doc().clone(), r))
             .map(Arc::from)
     }
 
     pub(crate) fn transaction_get_array(&self, name: String) -> Option<Arc<YrsArray>> {
-        self.transaction()
-            .as_ref()
-            .unwrap()
-            .get_array(name.as_str())
-            .map(YrsArray::from)
+        let txn = self.transaction();
+        let txn = txn.as_ref().unwrap();
+        txn.get_array(name.as_str())
+            .map(|r| YrsArray::new(txn.doc().clone(), r))
             .map(Arc::from)
     }
 
     pub(crate) fn transaction_get_map(&self, name: String) -> Option<Arc<YrsMap>> {
-        self.transaction()
-            .as_ref()
-            .unwrap()
-            .get_map(name.as_str())
-            .map(YrsMap::from)
+        let txn = self.transaction();
+        let txn = txn.as_ref().unwrap();
+        txn.get_map(name.as_str())
+            .map(|r| YrsMap::new(txn.doc().clone(), r))
             // ^^ this is reporting as return Option<{unknown}> instead of Option<YrsMap>, and I'm not sure why...
             .map(Arc::from)
     }

@@ -40,17 +40,17 @@ impl YrsDoc {
 
     pub(crate) fn get_text(&self, name: String) -> Arc<YrsText> {
         let text_ref = self.0.borrow().get_or_insert_text(name.as_str());
-        Arc::from(YrsText::from(text_ref))
+        Arc::from(YrsText::new(self.0.borrow().clone(), text_ref))
     }
 
     pub(crate) fn get_array(&self, name: String) -> Arc<YrsArray> {
         let array_ref: ArrayRef = self.0.borrow().get_or_insert_array(name.as_str()).into();
-        Arc::from(YrsArray::from(array_ref))
+        Arc::from(YrsArray::new(self.0.borrow().clone(), array_ref))
     }
 
     pub(crate) fn get_map(&self, name: String) -> Arc<YrsMap> {
         let map_ref: MapRef = self.0.borrow().get_or_insert_map(name.as_str()).into();
-        Arc::from(YrsMap::from(map_ref))
+        Arc::from(YrsMap::new(self.0.borrow().clone(), map_ref))
     }
 
     pub(crate) fn transact<'doc>(&self, origin: Option<YrsOrigin>) -> Arc<YrsTransaction> {

@@ -7,8 +7,12 @@ use std::sync::Arc;
 use yrs::{Any, Array, ArrayRef, Observable, Out as Value};
 use yrs::branch::Branch;
 use crate::doc::YrsCollectionPtr;
+use yrs::Doc;
 
-pub(crate) struct YrsArray(RefCell<ArrayRef>);
+/// The shared type and the document it lives in. Holding the `Doc` keeps its
+/// store alive for as long as anything can reach into it through this wrapper
+/// — including a keyed subscription's `unobserve`, which walks the branch.
+pub(crate) struct YrsArray(RefCell<ArrayRef>, Doc);
 
 unsafe impl Send for YrsArray {}
 unsafe impl Sync for YrsArray {}
@@ -22,9 +26,9 @@ impl AsRef<Branch> for YrsArray {
     }
 }
 
-impl From<ArrayRef> for YrsArray {
-    fn from(value: ArrayRef) -> Self {
-        YrsArray(RefCell::from(value))
+impl YrsArray {
+    pub(crate) fn new(doc: Doc, value: ArrayRef) -> Self {
+        YrsArray(RefCell::from(value), doc)
     }
 }
 pub(crate) trait YrsArrayEachDelegate: Send + Sync + Debug {
@@ -189,6 +193,7 @@ impl YrsArray {
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsArrayObservationDelegate>) -> Arc<YSubscription> {
         let array = self.0.borrow().clone();
+        let doc = self.1.clone();
         let key = next_observation_key();
         array.observe_with(key.clone(), move |transaction, array_event| {
             let delta = array_event.delta(transaction);
@@ -198,6 +203,7 @@ impl YrsArray {
         });
         Arc::new(YSubscription::keyed(move || {
             array.unobserve(key);
+            drop(doc);
         }))
     }
 
