@@ -169,12 +169,16 @@ mod tests {
         }
         let txn = peer.transact();
         assert_eq!(peer_text.get_string(&txn), "hello");
+        // Compare the raw ids the peer holds, not lookups through ClientID::new —
+        // under `small-client` that constructor truncates the key too, and a lookup
+        // would find the truncated block and pass for the wrong reason.
+        let credited = |sv: &StateVector| -> Vec<(u64, u32)> {
+            sv.iter().map(|(client, clock)| (client.get(), *clock)).collect()
+        };
         let sv = txn.state_vector();
-        assert_eq!(sv.get(&ClientID::new(author)), 5, "the block is credited to the 53-bit author");
-        assert_eq!(sv.get(&ClientID::new(author & u32::MAX as u64)), 0, "and not to its u32 truncation");
+        assert_eq!(credited(&sv), vec![(author, 5)], "the block is credited to the 53-bit author");
         // Re-encoding must carry the same id back out.
-        let sv_bytes = sv.encode_v1();
-        let decoded = StateVector::decode_v1(&sv_bytes).unwrap();
-        assert_eq!(decoded.get(&ClientID::new(author)), 5);
+        let decoded = StateVector::decode_v1(&sv.encode_v1()).unwrap();
+        assert_eq!(credited(&decoded), vec![(author, 5)]);
     }
 }

@@ -1,6 +1,6 @@
 use crate::attrs::YrsAttrs;
 use crate::delta::YrsDelta;
-use crate::subscription::{next_observation_key, YSubscription};
+use crate::subscription::{delegate_of, delegate_slot, YSubscription};
 use crate::transaction::YrsTransaction;
 use yrs::Any;
 use std::cell::RefCell;
@@ -135,16 +135,16 @@ impl YrsText {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsTextObservationDelegate>) -> Arc<YSubscription> {
-        let text = self.0.borrow().clone();
-        let key = next_observation_key();
-        text.observe_with(key.clone(), move |transaction, text_event| {
+        let slot = delegate_slot(delegate);
+        let callback_slot = slot.clone();
+        let subscription = self.0.borrow().observe(move |transaction, text_event| {
             let delta = text_event.delta(transaction);
             let result: Vec<YrsDelta> =
                 delta.iter().map(|change| YrsDelta::from(change)).collect();
-            delegate.call(result)
+            if let Some(delegate) = delegate_of(&callback_slot) {
+                delegate.call(result)
+            }
         });
-        Arc::new(YSubscription::keyed(move || {
-            text.unobserve(key);
-        }))
+        Arc::new(YSubscription::with_delegate(subscription, slot))
     }
 }

@@ -1,6 +1,6 @@
 use crate::error::CodingError;
 use crate::mapchange::{YrsEntryChange, YrsMapChange};
-use crate::subscription::{next_observation_key, YSubscription};
+use crate::subscription::{delegate_of, delegate_slot, YSubscription};
 use crate::transaction::YrsTransaction;
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -273,9 +273,9 @@ impl YrsMap {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsMapObservationDelegate>) -> Arc<YSubscription> {
-        let map = self.0.borrow().clone();
-        let key = next_observation_key();
-        map.observe_with(key.clone(), move |transaction, map_event| {
+        let slot = delegate_slot(delegate);
+        let callback_slot = slot.clone();
+        let subscription = self.0.borrow().observe(move |transaction, map_event| {
             let delta = map_event.keys(transaction);
             let result: Vec<YrsMapChange> = delta
                 .iter()
@@ -284,11 +284,11 @@ impl YrsMap {
                     change: YrsEntryChange::from(val.1),
                 })
                 .collect();
-            delegate.call(result)
+            if let Some(delegate) = delegate_of(&callback_slot) {
+                delegate.call(result)
+            }
         });
-        Arc::new(YSubscription::keyed(move || {
-            map.unobserve(key);
-        }))
+        Arc::new(YSubscription::with_delegate(subscription, slot))
     }
 }
 

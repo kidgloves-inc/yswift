@@ -1,4 +1,4 @@
-use crate::subscription::{next_observation_key, YSubscription};
+use crate::subscription::{delegate_of, delegate_slot, YSubscription};
 use crate::transaction::YrsTransaction;
 use crate::{change::YrsChange, error::CodingError};
 use std::cell::RefCell;
@@ -188,17 +188,17 @@ impl YrsArray {
     }
 
     pub(crate) fn observe(&self, delegate: Box<dyn YrsArrayObservationDelegate>) -> Arc<YSubscription> {
-        let array = self.0.borrow().clone();
-        let key = next_observation_key();
-        array.observe_with(key.clone(), move |transaction, array_event| {
+        let slot = delegate_slot(delegate);
+        let callback_slot = slot.clone();
+        let subscription = self.0.borrow().observe(move |transaction, array_event| {
             let delta = array_event.delta(transaction);
             let result: Vec<YrsChange> =
                 delta.iter().map(|change| YrsChange::from(change)).collect();
-            delegate.call(result)
+            if let Some(delegate) = delegate_of(&callback_slot) {
+                delegate.call(result)
+            }
         });
-        Arc::new(YSubscription::keyed(move || {
-            array.unobserve(key);
-        }))
+        Arc::new(YSubscription::with_delegate(subscription, slot))
     }
 
     pub(crate) fn to_a(&self, transaction: &YrsTransaction) -> Vec<String> {
