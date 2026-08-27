@@ -32,11 +32,13 @@ What changed to get onto `yrs = { version = "0.27.4", features = ["sync"] }`:
 - `UndoManager::new()` takes no document, and `expand_scope` takes `&Doc` —
   undo managers span documents now — so `YrsUndoManager` holds a `Doc` clone.
   `undo`/`redo` are `async`; the `_blocking` forms are used, and they wait for
-  exclusive store access rather than failing, so `YrsUndoError::PendingTransaction`
-  has no source any more and `undo`/`redo`/`clear` stop throwing on the Swift
-  side. The cost is documented on `YUndoManager.undo()`: an undo issued from
-  inside a transaction on the same document deadlocks instead of throwing.
-  `clear` is `clear_all`. Observers take `&mut self`.
+  exclusive store access rather than failing — so an undo issued inside a
+  transaction on the same document would deadlock. The binding probes
+  `try_transact_mut()` first and returns `YrsUndoError::PendingTransaction`
+  when a transaction is open, which keeps the pre-0.27 contract
+  (`undo`/`redo`/`clear` throw, never hang); a test issues an undo from inside
+  `transactSync` under a timeout guard. `clear` is `clear_all`. Observers take
+  `&mut self`.
 - `AsRef<Branch>` is implemented for several types now, so the `'static`
   branch transmutes name the impl explicitly.
 - Dropping a yrs `Subscription` no longer removes the callback; it queues the
@@ -58,7 +60,13 @@ What changed to get onto `yrs = { version = "0.27.4", features = ["sync"] }`:
 - `Cargo.lock` is committed: `scripts/build-xcframework.sh` builds with
   `--locked`, and a release must be reproducible from the tree.
 - Upstream PR #54 (`diff(from: [])` treated as "full state" instead of a
-  decoder panic, by Mike / `appymichael`) is folded in with its tests.
+  decoder panic) is folded in with its tests. Its author is Mike
+  (`appymichael`), and the commit that carried it here (`1508b82`) cannot be
+  amended, so the credit lives here and on every commit that carries his work
+  outward: `Co-authored-by: Mike <mikejsowden@outlook.com>`. The empty-vector
+  case has since moved into Rust (`encode_diff_v1` treats an empty slice as
+  the empty state vector), which makes the Swift side a pass-through; his
+  tests still pin the behaviour.
 
 Deliberately not done here: `small-client` (the 32-bit compatibility flag —
 the opposite of the goal), the `uniffi` 0.29+ move (removes

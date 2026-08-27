@@ -1380,7 +1380,7 @@ public protocol YrsTransactionProtocol : AnyObject {
      * The state vector as (client id, clock) pairs. `transaction_state_vector`
      * hands back the same information encoded; this is the decoded view, so a
      * caller can check which client a document credits without a decoder of its
-     * own. Client ids are 53-bit since yrs 0.27 (yjs v14 compatible).
+     * own. Client ids are 53-bit since yrs 0.26 (y-crdt #612, 2026-05-04; yjs v14 compatible).
      */
     func transactionClientStates()  -> [YrsClientState]
     
@@ -1465,7 +1465,7 @@ open func transactionApplyUpdate(update: [UInt8])throws  {try rustCallWithError(
      * The state vector as (client id, clock) pairs. `transaction_state_vector`
      * hands back the same information encoded; this is the decoded view, so a
      * caller can check which client a document credits without a decoder of its
-     * own. Client ids are 53-bit since yrs 0.27 (yjs v14 compatible).
+     * own. Client ids are 53-bit since yrs 0.26 (y-crdt #612, 2026-05-04; yjs v14 compatible).
      */
 open func transactionClientStates() -> [YrsClientState] {
     return try!  FfiConverterSequenceTypeYrsClientState.lift(try! rustCall() {
@@ -1716,8 +1716,9 @@ public protocol YrsUndoManagerProtocol : AnyObject {
     
     /**
      * Clears the undo/redo stacks of a current undo manager.
+     * Fails to execute if there's another transaction in progress.
      */
-    func clear() 
+    func clear() throws 
     
     func observeAdded(delegate: YrsUndoManagerObservationDelegate)  -> YSubscription
     
@@ -1728,8 +1729,9 @@ public protocol YrsUndoManagerProtocol : AnyObject {
     /**
      * Redoes the last operation from undo stack, returning false if redo stack was
      * empty an method had no effect.
+     * Fails to execute if there's another transaction in progress.
      */
-    func redo()  -> Bool
+    func redo() throws  -> Bool
     
     /**
      * Removes an existing origin identifier from a list of tracked origins. If tracked
@@ -1741,8 +1743,9 @@ public protocol YrsUndoManagerProtocol : AnyObject {
     /**
      * Undoes the last operation, pushing it onto redo stack, returning false if undo
      * stack was empty an method had no effect.
+     * Fails to execute if there's another transaction in progress.
      */
-    func undo()  -> Bool
+    func undo() throws  -> Bool
     
     /**
      * Wraps a set of recent changes together into a single undo operation. These
@@ -1821,8 +1824,9 @@ open func addScope(trackedRef: YrsCollectionPtr) {try! rustCall() {
     
     /**
      * Clears the undo/redo stacks of a current undo manager.
+     * Fails to execute if there's another transaction in progress.
      */
-open func clear() {try! rustCall() {
+open func clear()throws  {try rustCallWithError(FfiConverterTypeYrsUndoError.lift) {
     uniffi_uniffi_yniffi_fn_method_yrsundomanager_clear(self.uniffiClonePointer(),$0
     )
 }
@@ -1855,9 +1859,10 @@ open func observeUpdated(delegate: YrsUndoManagerObservationDelegate) -> YSubscr
     /**
      * Redoes the last operation from undo stack, returning false if redo stack was
      * empty an method had no effect.
+     * Fails to execute if there's another transaction in progress.
      */
-open func redo() -> Bool {
-    return try!  FfiConverterBool.lift(try! rustCall() {
+open func redo()throws  -> Bool {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeYrsUndoError.lift) {
     uniffi_uniffi_yniffi_fn_method_yrsundomanager_redo(self.uniffiClonePointer(),$0
     )
 })
@@ -1878,9 +1883,10 @@ open func removeOrigin(origin: YrsOrigin) {try! rustCall() {
     /**
      * Undoes the last operation, pushing it onto redo stack, returning false if undo
      * stack was empty an method had no effect.
+     * Fails to execute if there's another transaction in progress.
      */
-open func undo() -> Bool {
-    return try!  FfiConverterBool.lift(try! rustCall() {
+open func undo()throws  -> Bool {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeYrsUndoError.lift) {
     uniffi_uniffi_yniffi_fn_method_yrsundomanager_undo(self.uniffiClonePointer(),$0
     )
 })
@@ -2067,6 +2073,8 @@ public enum CodingError {
     
     case DecodingError(message: String)
     
+    case ApplyError(message: String)
+    
 }
 
 
@@ -2088,6 +2096,10 @@ public struct FfiConverterTypeCodingError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 3: return .ApplyError(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2103,6 +2115,8 @@ public struct FfiConverterTypeCodingError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(1))
         case .DecodingError(_ /* message is ignored*/):
             writeInt(&buf, Int32(2))
+        case .ApplyError(_ /* message is ignored*/):
+            writeInt(&buf, Int32(3))
 
         
         }
@@ -2329,6 +2343,54 @@ public func FfiConverterTypeYrsEntryChange_lower(_ value: YrsEntryChange) -> Rus
 extension YrsEntryChange: Equatable, Hashable {}
 
 
+
+
+public enum YrsUndoError {
+
+    
+    
+    case PendingTransaction(message: String)
+    
+}
+
+
+public struct FfiConverterTypeYrsUndoError: FfiConverterRustBuffer {
+    typealias SwiftType = YrsUndoError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> YrsUndoError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .PendingTransaction(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: YrsUndoError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        case .PendingTransaction(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+
+        
+        }
+    }
+}
+
+
+extension YrsUndoError: Equatable, Hashable {}
+
+extension YrsUndoError: Error { }
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -3472,7 +3534,7 @@ private var initializationResult: InitializationResult {
     if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_add_scope() != 20994) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_clear() != 51404) {
+    if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_clear() != 62142) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_observe_added() != 56228) {
@@ -3484,13 +3546,13 @@ private var initializationResult: InitializationResult {
     if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_observe_updated() != 19534) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_redo() != 11219) {
+    if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_redo() != 5163) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_remove_origin() != 14248) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_undo() != 27596) {
+    if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_undo() != 44889) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_method_yrsundomanager_wrap_changes() != 6579) {

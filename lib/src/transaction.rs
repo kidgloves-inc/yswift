@@ -96,12 +96,13 @@ impl YrsTransaction {
 
     pub(crate) fn transaction_apply_update(&self, update: Vec<u8>) -> Result<(), CodingError> {
         let update = Update::decode_v1(update.as_slice()).map_err(|_e| CodingError::DecodingError)?;
-        // yrs >= 0.27 reports integration failures instead of panicking.
+        // yrs >= 0.27 reports integration failures instead of panicking; they
+        // are not decoding failures, and a caller may want to tell them apart.
         self.transaction()
             .as_mut()
             .unwrap()
             .apply_update(update)
-            .map_err(|_e| CodingError::DecodingError)
+            .map_err(|_e| CodingError::ApplyError)
     }
 
     pub(crate) fn transaction_get_text(&self, name: String) -> Option<Arc<YrsText>> {
