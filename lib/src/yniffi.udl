@@ -1,6 +1,11 @@
 namespace yniffi {};
 
 [Error]
+enum YrsDocError {
+  "ClientIdOutOfRange",
+};
+
+[Error]
 enum CodingError {
   "EncodingError",
   "DecodingError",
@@ -9,6 +14,20 @@ enum CodingError {
 
 interface YrsDoc {
   constructor();
+
+  /// A document authoring under a caller-chosen client id, optionally keeping
+  /// its deleted blocks (`skip_gc`). The property tiers need it — the Rust
+  /// `proptests` module here and their Kotlin mirror in kidgloves-inc/ykt —
+  /// because a property over the enumerated corner ids {1, 2^31-1, 2^31,
+  /// 2^32-1, 2^32, 2^53-1} has to author under one, and the plain constructor
+  /// draws the id itself. Ordinary callers use the plain constructor: a
+  /// document's client id is then the core's own draw, which is what keeps
+  /// every id a peer holds one that some peer issued. Refuses an id at or
+  /// above 2^53: the core would mask it to a different id without a word,
+  /// which is the shape of the fork the u32 client-id truncation in yrs
+  /// 0.18's V1 decoder caused.
+  [Throws=YrsDocError, Name=with_client_id]
+  constructor(u64 client_id, boolean skip_gc);
 
   [Throws=CodingError]
   sequence<u8> encode_diff_v1([ByRef] YrsTransaction tx, sequence<u8> state_vector);
@@ -30,8 +49,17 @@ interface YrsTransaction {
   /// The state vector as (client id, clock) pairs. `transaction_state_vector`
   /// hands back the same information encoded; this is the decoded view, so a
   /// caller can check which client a document credits without a decoder of its
-  /// own. Client ids are 53-bit since yrs 0.26 (y-crdt #612, 2026-05-04; yjs v14 compatible).
+  /// own. Client ids are 53-bit since yrs 0.26 (yjs v14 compatible).
   sequence<YrsClientState> transaction_client_states();
+
+  /// True while the document is holding updates it cannot integrate yet, because
+  /// the updates they depend on have not arrived (yrs >= 0.23.3; `ReadTxn::has_missing_updates`
+  /// is `store.pending.is_some() || store.pending_ds.is_some()`). A document in this
+  /// state accepts edits and renders, so nothing above the core can see it — asking is the
+  /// only way to tell a live document from a stalled one.
+  /// See `transaction::tests::a_withheld_dependency_leaves_the_document_missing_updates`.
+  boolean transaction_has_missing_updates();
+
   [Throws=CodingError]
   void transaction_apply_update(sequence<u8> update);
 

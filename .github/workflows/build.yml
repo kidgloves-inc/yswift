@@ -52,3 +52,43 @@ jobs:
     #     cd examples
     #     tuist build
 
+  rust:
+    name: Rust property tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Project
+      uses: actions/checkout@v3
+
+    # rust-toolchain.toml pins the compiler and, for the XCFramework build,
+    # five Apple targets. Only the compiler is wanted here: anything that
+    # honours the whole file (`rustup show`, or an action that reads it) also
+    # downloads iOS and macOS rust-std onto a runner that will never
+    # cross-compile. So the channel is read out of the file and installed by
+    # name, and every cargo invocation below names it, which is what makes the
+    # property tier run on the same compiler the XCFramework is built with.
+    - name: Read the pinned channel
+      id: toolchain
+      run: |
+        CHANNEL=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml","rb"))["toolchain"]["channel"])')
+        echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+    - name: Install the pinned toolchain
+      run: |
+        rustup toolchain install "${{ steps.toolchain.outputs.channel }}" \
+          --profile minimal --no-self-update
+        cargo "+${{ steps.toolchain.outputs.channel }}" --version
+
+    - name: Test the binding
+      run: |
+        cargo "+${{ steps.toolchain.outputs.channel }}" test --locked \
+          --manifest-path lib/Cargo.toml
+
+    # The cargo-fuzz targets are type-checked, not run: running them needs a
+    # nightly toolchain and a time budget, and the property tests above carry
+    # the same questions in a form that finishes. Checking them keeps a change
+    # to the binding from leaving a target that no longer compiles.
+    - name: Check the fuzz targets
+      run: |
+        cargo "+${{ steps.toolchain.outputs.channel }}" check --locked \
+          --manifest-path lib/fuzz/Cargo.toml

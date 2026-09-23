@@ -1,11 +1,11 @@
 use crate::array::YrsArray;
-use crate::error::CodingError;
+use crate::error::{CodingError, YrsDocError};
 use crate::map::YrsMap;
 use crate::text::YrsText;
 use crate::transaction::YrsTransaction;
 use std::sync::Arc;
 use std::{borrow::Borrow, cell::RefCell};
-use yrs::{updates::decoder::Decode, ArrayRef, Doc, OffsetKind, Options, StateVector, Transact, Origin};
+use yrs::{updates::decoder::Decode, ArrayRef, ClientID, Doc, OffsetKind, Options, StateVector, Transact, Origin};
 use yrs::{MapRef, ReadTxn};
 use yrs::branch::Branch;
 use crate::undo::YrsUndoManager;
@@ -23,6 +23,22 @@ impl YrsDoc {
         let doc = yrs::Doc::with_options(options);
 
         Self(RefCell::from(doc))
+    }
+
+    /// A document under a caller-chosen client id, for the property tiers
+    /// (see the UDL). The offset kind is forced to UTF-16 exactly as
+    /// [YrsDoc::new] does, so a document built this way counts text offsets
+    /// the way the Swift side does. `ClientID::new` masks bits above the 53rd
+    /// away silently in a release build, so the width is checked here.
+    pub(crate) fn with_client_id(client_id: u64, skip_gc: bool) -> Result<Self, YrsDocError> {
+        if client_id >> 53 != 0 {
+            return Err(YrsDocError::ClientIdOutOfRange);
+        }
+        let mut options = Options::default();
+        options.client_id = ClientID::new(client_id);
+        options.skip_gc = skip_gc;
+        options.offset_kind = OffsetKind::Utf16;
+        Ok(Self(RefCell::from(yrs::Doc::with_options(options))))
     }
 
     pub(crate) fn encode_diff_v1(
@@ -151,13 +167,11 @@ mod tests {
     /// A client id above 2^32 must land in a peer's state vector unchanged. yrs 0.18's
     /// V1 decoder read the id as a u32, which is how a 53-bit author became a
     /// different, truncated author on the receiving side and forked the document.
-    #[test]
-    fn a_53_bit_client_id_survives_the_v1_round_trip() {
-        // The pycrdt-authored id from the incident this fork exists for; well above 2^32
-        // and inside yrs's 53-bit range (ClientID::new masks above bit 53).
-        let author: u64 = 967_714_667_641_833;
-        assert!(author > u32::MAX as u64);
-        assert!(author < (1u64 << 53));
+    /// One author id's round trip, extracted so the loop below can name which
+    /// corner id failed rather than reporting one line for all of them.
+    fn assert_53_bit_client_id_survives_the_v1_round_trip(author: u64) {
+        assert!(author > u32::MAX as u64, "corner id {author} must be above u32::MAX to exercise the truncation bug");
+        assert!(author < (1u64 << 53), "corner id {author} must be inside yrs's 53-bit range (ClientID::new masks above bit 53)");
 
         let mut options = Options::default();
         options.client_id = ClientID::new(author);
@@ -176,7 +190,7 @@ mod tests {
             txn.apply_update(Update::decode_v1(&update).unwrap()).unwrap();
         }
         let txn = peer.transact();
-        assert_eq!(peer_text.get_string(&txn), "hello");
+        assert_eq!(peer_text.get_string(&txn), "hello", "corner id {author}: text did not survive the round trip");
         // Compare the raw ids the peer holds, not lookups through ClientID::new —
         // under `small-client` that constructor truncates the key too, and a lookup
         // would find the truncated block and pass for the wrong reason.
@@ -184,10 +198,22 @@ mod tests {
             sv.iter().map(|(client, clock)| (client.get(), *clock)).collect()
         };
         let sv = txn.state_vector();
-        assert_eq!(credited(&sv), vec![(author, 5)], "the block is credited to the 53-bit author");
+        assert_eq!(credited(&sv), vec![(author, 5)], "corner id {author}: the block is credited to the 53-bit author");
         // Re-encoding must carry the same id back out.
         let decoded = StateVector::decode_v1(&sv.encode_v1()).unwrap();
-        assert_eq!(credited(&decoded), vec![(author, 5)]);
+        assert_eq!(credited(&decoded), vec![(author, 5)], "corner id {author}: re-encoding must carry the same id back out");
+    }
+
+    #[test]
+    fn a_53_bit_client_id_survives_the_v1_round_trip() {
+        // The two corners of the enumerated corner set {1, 2^31-1, 2^31,
+        // 2^32-1, 2^32, 2^53-1} that bear on this claim, and one id between
+        // them: 2^32, where yrs 0.18's V1 decoder started truncating; a
+        // pycrdt-authored id observed in the wild, well above that boundary;
+        // and 2^53 - 1, the top of the range ClientID::new admits.
+        for author in [1u64 << 32, 967_714_667_641_833, (1u64 << 53) - 1] {
+            assert_53_bit_client_id_survives_the_v1_round_trip(author);
+        }
     }
 
     fn varint(mut v: u64, out: &mut Vec<u8>) {

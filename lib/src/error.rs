@@ -9,3 +9,11 @@ pub enum CodingError {
     #[error("ApplyError")]
     ApplyError,
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum YrsDocError {
+    /// `YrsDoc::with_client_id` was given an id at or above 2^53, the width
+    /// a yjs-compatible client id has.
+    #[error("ClientIdOutOfRange")]
+    ClientIdOutOfRange,
+}

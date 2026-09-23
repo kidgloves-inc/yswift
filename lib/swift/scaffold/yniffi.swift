@@ -1380,7 +1380,7 @@ public protocol YrsTransactionProtocol : AnyObject {
      * The state vector as (client id, clock) pairs. `transaction_state_vector`
      * hands back the same information encoded; this is the decoded view, so a
      * caller can check which client a document credits without a decoder of its
-     * own. Client ids are 53-bit since yrs 0.26 (y-crdt #612, 2026-05-04; yjs v14 compatible).
+     * own. Client ids are 53-bit since yrs 0.26 (yjs v14 compatible).
      */
     func transactionClientStates()  -> [YrsClientState]
     
@@ -1395,6 +1395,16 @@ public protocol YrsTransactionProtocol : AnyObject {
     func transactionGetMap(name: String)  -> YrsMap?
     
     func transactionGetText(name: String)  -> YrsText?
+    
+    /**
+     * True while the document is holding updates it cannot integrate yet, because
+     * the updates they depend on have not arrived (yrs >= 0.23.3; `ReadTxn::has_missing_updates`
+     * is `store.pending.is_some() || store.pending_ds.is_some()`). A document in this
+     * state accepts edits and renders, so nothing above the core can see it — asking is the
+     * only way to tell a live document from a stalled one.
+     * See `transaction::tests::a_withheld_dependency_leaves_the_document_missing_updates`.
+     */
+    func transactionHasMissingUpdates()  -> Bool
     
     func transactionStateVector()  -> [UInt8]
     
@@ -1465,7 +1475,7 @@ open func transactionApplyUpdate(update: [UInt8])throws  {try rustCallWithError(
      * The state vector as (client id, clock) pairs. `transaction_state_vector`
      * hands back the same information encoded; this is the decoded view, so a
      * caller can check which client a document credits without a decoder of its
-     * own. Client ids are 53-bit since yrs 0.26 (y-crdt #612, 2026-05-04; yjs v14 compatible).
+     * own. Client ids are 53-bit since yrs 0.26 (yjs v14 compatible).
      */
 open func transactionClientStates() -> [YrsClientState] {
     return try!  FfiConverterSequenceTypeYrsClientState.lift(try! rustCall() {
@@ -1516,6 +1526,21 @@ open func transactionGetText(name: String) -> YrsText? {
     return try!  FfiConverterOptionTypeYrsText.lift(try! rustCall() {
     uniffi_uniffi_yniffi_fn_method_yrstransaction_transaction_get_text(self.uniffiClonePointer(),
         FfiConverterString.lower(name),$0
+    )
+})
+}
+    
+    /**
+     * True while the document is holding updates it cannot integrate yet, because
+     * the updates they depend on have not arrived (yrs >= 0.23.3; `ReadTxn::has_missing_updates`
+     * is `store.pending.is_some() || store.pending_ds.is_some()`). A document in this
+     * state accepts edits and renders, so nothing above the core can see it — asking is the
+     * only way to tell a live document from a stalled one.
+     * See `transaction::tests::a_withheld_dependency_leaves_the_document_missing_updates`.
+     */
+open func transactionHasMissingUpdates() -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_uniffi_yniffi_fn_method_yrstransaction_transaction_has_missing_updates(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -3514,6 +3539,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_method_yrstransaction_transaction_get_text() != 54845) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_uniffi_yniffi_checksum_method_yrstransaction_transaction_has_missing_updates() != 7916) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_method_yrstransaction_transaction_state_vector() != 39028) {

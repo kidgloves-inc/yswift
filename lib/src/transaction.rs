@@ -94,6 +94,13 @@ impl YrsTransaction {
             .collect()
     }
 
+    // True while the store holds updates whose dependencies have not arrived; a
+    // document in this state still edits and renders, so nothing else reports it.
+    // See tests::a_withheld_dependency_leaves_the_document_missing_updates.
+    pub(crate) fn transaction_has_missing_updates(&self) -> bool {
+        self.transaction().as_ref().unwrap().has_missing_updates()
+    }
+
     pub(crate) fn transaction_apply_update(&self, update: Vec<u8>) -> Result<(), CodingError> {
         let update = Update::decode_v1(update.as_slice()).map_err(|_e| CodingError::DecodingError)?;
         // yrs >= 0.27 reports integration failures instead of panicking; they
@@ -135,5 +142,66 @@ impl YrsTransaction {
 
     pub(crate) fn free(&self) {
         self.0.replace(None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::doc::YrsDoc;
+    use yrs::{ClientID, Doc, Options, ReadTxn, StateVector, Text, Transact};
+
+    /// A state a document can sit in indefinitely without any other symptom. An update
+    /// that names a dependency the receiver has never seen is not rejected and does not
+    /// raise: yrs parks it in `store.pending` and carries on, so the document opens,
+    /// accepts edits and renders exactly as a healthy one does while every later update
+    /// is quietly withheld too. Nothing above the core can distinguish the two — it is
+    /// the only thing that knows, and `has_missing_updates` is it saying so. The pair of assertions is the
+    /// whole contract: true while the dependency is withheld, false the moment it lands
+    /// (and not merely "false eventually" — the same transaction that integrates the
+    /// missing block must clear the flag, or a caller polling it would never recover).
+    #[test]
+    fn a_withheld_dependency_leaves_the_document_missing_updates() {
+        // A pycrdt-authored id observed in the wild, well above 2^32 (see
+        // doc::tests::a_53_bit_client_id_survives_the_v1_round_trip).
+        let mut options = Options::default();
+        options.client_id = ClientID::new(967_714_667_641_833);
+        let source = Doc::with_options(options);
+        let text = source.get_or_insert_text("prompt");
+
+        let (first, after_first) = {
+            let mut txn = source.transact_mut();
+            text.insert(&mut txn, 0, "a");
+            (
+                txn.encode_state_as_update_v1(&StateVector::default()),
+                txn.state_vector(),
+            )
+        };
+        // The second block's left origin is the "a" of the first, so it cannot be
+        // integrated by a peer that has not been given `first`.
+        let second = {
+            let mut txn = source.transact_mut();
+            text.insert(&mut txn, 1, "b");
+            txn.encode_diff_v1(&after_first)
+        };
+
+        let doc = YrsDoc::new();
+        let peer_text = doc.get_text("prompt".into());
+        let txn = doc.transact(None);
+        assert!(!txn.transaction_has_missing_updates(), "a fresh document owes nothing");
+
+        txn.transaction_apply_update(second).unwrap();
+        assert!(
+            txn.transaction_has_missing_updates(),
+            "the dependent block is pending, not integrated"
+        );
+        assert_eq!(peer_text.get_string(&txn), "", "and nothing of it is visible");
+
+        txn.transaction_apply_update(first).unwrap();
+        assert!(
+            !txn.transaction_has_missing_updates(),
+            "delivering the dependency drains the pending store"
+        );
+        assert_eq!(peer_text.get_string(&txn), "ab");
+        txn.free();
     }
 }

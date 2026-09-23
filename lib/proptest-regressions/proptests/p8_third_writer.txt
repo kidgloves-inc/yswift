@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 89238990183c71e91adcea5fce2e34fdf00d7b5c64c1c1d794583e90d1e9f810 # shrinks to cores = [1, 2147483647], assigned = 2, opening = "a", program = [Edit { peer: 0, edit: Insert { pos: 0, chunk: "a" } }, Deliver { peer: 2, index: 0 }, Edit { peer: 2, edit: Insert { pos: 0, chunk: "a" } }, Edit { peer: 0, edit: Insert { pos: 0, chunk: "H" } }]

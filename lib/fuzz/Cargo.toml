@@ -1,0 +1,43 @@
+[package]
+name = "yniffi-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: the crate above is built with `panic = "abort"` and a size
+# oriented release profile for the XCFramework, and a fuzzer wants neither.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# The binding itself, through its `fuzzing` feature, which compiles
+# `src/probe.rs` into a normal build. Every target below calls the same entry
+# points Swift calls.
+yniffi = { path = "..", features = ["fuzzing"] }
+
+[[bin]]
+name = "apply_update"
+path = "fuzz_targets/apply_update.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "apply_update_seeded"
+path = "fuzz_targets/apply_update_seeded.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "encode_diff_v1"
+path = "fuzz_targets/encode_diff_v1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "encode_state_from_sv"
+path = "fuzz_targets/encode_state_from_sv.rs"
+test = false
+doc = false
