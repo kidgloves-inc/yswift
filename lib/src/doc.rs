@@ -1,11 +1,11 @@
 use crate::array::YrsArray;
-use crate::error::CodingError;
+use crate::error::{CodingError, YrsDocError};
 use crate::map::YrsMap;
 use crate::text::YrsText;
 use crate::transaction::YrsTransaction;
 use std::sync::Arc;
 use std::{borrow::Borrow, cell::RefCell};
-use yrs::{updates::decoder::Decode, ArrayRef, Doc, OffsetKind, Options, StateVector, Transact, Origin};
+use yrs::{updates::decoder::Decode, ArrayRef, ClientID, Doc, OffsetKind, Options, StateVector, Transact, Origin};
 use yrs::{MapRef, ReadTxn};
 use yrs::branch::Branch;
 use crate::undo::YrsUndoManager;
@@ -23,6 +23,22 @@ impl YrsDoc {
         let doc = yrs::Doc::with_options(options);
 
         Self(RefCell::from(doc))
+    }
+
+    /// A document under a caller-chosen client id (see the UDL). The offset
+    /// kind is forced to UTF-16 exactly as [YrsDoc::new] does, so a document
+    /// built this way counts text offsets the way the Swift side does.
+    /// `ClientID::new` masks bits above the 53rd away silently in a release
+    /// build, so the width is checked here.
+    pub(crate) fn with_client_id(client_id: u64, skip_gc: bool) -> Result<Self, YrsDocError> {
+        if client_id >> 53 != 0 {
+            return Err(YrsDocError::ClientIdOutOfRange);
+        }
+        let mut options = Options::default();
+        options.client_id = ClientID::new(client_id);
+        options.skip_gc = skip_gc;
+        options.offset_kind = OffsetKind::Utf16;
+        Ok(Self(RefCell::from(yrs::Doc::with_options(options))))
     }
 
     pub(crate) fn encode_diff_v1(
@@ -142,7 +158,7 @@ impl UniffiCustomTypeConverter for YrsCollectionPtr {
 }
 #[cfg(test)]
 mod tests {
-    use crate::error::CodingError;
+    use crate::error::{CodingError, YrsDocError};
     use crate::YrsDoc;
     use yrs::updates::decoder::Decode;
     use yrs::updates::encoder::Encode;
@@ -153,8 +169,8 @@ mod tests {
     /// different, truncated author on the receiving side and forked the document.
     #[test]
     fn a_53_bit_client_id_survives_the_v1_round_trip() {
-        // The pycrdt-authored id from the incident this fork exists for; well above 2^32
-        // and inside yrs's 53-bit range (ClientID::new masks above bit 53).
+        // Well above 2^32, as a peer drawing 53-bit ids produces them, and inside
+        // yrs's 53-bit range (ClientID::new masks above bit 53).
         let author: u64 = 967_714_667_641_833;
         assert!(author > u32::MAX as u64);
         assert!(author < (1u64 << 53));
@@ -256,5 +272,61 @@ mod tests {
         let from_zero = doc.encode_diff_v1(&txn, vec![0]).unwrap(); // encoded empty sv
         assert_eq!(whole, from_zero);
         txn.free();
+    }
+
+    #[test]
+    fn a_client_id_at_or_above_2_pow_53_is_refused() {
+        assert!(matches!(
+            YrsDoc::with_client_id(1 << 53, false),
+            Err(YrsDocError::ClientIdOutOfRange)
+        ));
+        assert!(matches!(
+            YrsDoc::with_client_id(u64::MAX, false),
+            Err(YrsDocError::ClientIdOutOfRange)
+        ));
+        assert!(YrsDoc::with_client_id((1 << 53) - 1, false).is_ok());
+    }
+
+    #[test]
+    fn a_document_authors_under_the_client_id_it_was_given() {
+        let author: u64 = (1 << 53) - 1;
+        let doc = YrsDoc::with_client_id(author, false).unwrap();
+        let text = doc.get_text("prompt".into());
+        let txn = doc.transact(None);
+        text.insert(&txn, 0, "hello".into());
+        let update = Update::decode_v1(&doc.encode_diff_v1(&txn, vec![]).unwrap()).unwrap();
+        txn.free();
+        let credited: Vec<(u64, u32)> = update
+            .state_vector()
+            .iter()
+            .map(|(client, clock)| (client.get(), *clock))
+            .collect();
+        assert_eq!(credited, vec![(author, 5)]);
+    }
+
+    /// The whole document, encoded after a text was written and then deleted in
+    /// a later transaction.
+    fn encoded_after_a_delete(skip_gc: bool) -> Vec<u8> {
+        let doc = YrsDoc::with_client_id(7, skip_gc).unwrap();
+        let text = doc.get_text("prompt".into());
+        let txn = doc.transact(None);
+        text.insert(&txn, 0, "deleted-marker".into());
+        txn.free();
+        let txn = doc.transact(None);
+        text.remove_range(&txn, 0, 14);
+        txn.free();
+        let txn = doc.transact(None);
+        let encoded = doc.encode_diff_v1(&txn, vec![]).unwrap();
+        txn.free();
+        encoded
+    }
+
+    /// With garbage collection on, committing a delete drops the deleted
+    /// content and only its length is encoded; `skip_gc` keeps the content.
+    #[test]
+    fn skip_gc_keeps_deleted_content_in_the_encoded_state() {
+        let contains = |bytes: &[u8]| bytes.windows(14).any(|w| w == b"deleted-marker");
+        assert!(contains(&encoded_after_a_delete(true)), "skip_gc keeps it");
+        assert!(!contains(&encoded_after_a_delete(false)), "gc drops it");
     }
 }

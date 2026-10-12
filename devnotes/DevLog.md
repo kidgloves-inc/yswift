@@ -1,5 +1,28 @@
 # Decision log
 
+## 2026-10-11
+
+### Two UDL members, and the crate as an rlib
+
+`YrsDoc.with_client_id(client_id, skip_gc)` builds a document under a
+caller-chosen client id, optionally keeping deleted blocks, for tests that have
+to author under a particular id; the plain constructor draws the id itself. It
+refuses an id at or above 2^53 with a new error type,
+`YrsDocError.ClientIdOutOfRange`, rather than let `ClientID::new` mask it to a
+different id in a release build. It is a separate error type, not a
+`CodingError` case, because nothing is being encoded or decoded.
+
+`YrsTransaction.transaction_has_missing_updates()` passes through yrs's
+`ReadTxn::has_missing_updates`: true while the store holds updates whose
+dependencies have not arrived, which no other observable shows. On yrs 0.27.4
+it has a known false positive, recorded on the UDL comment.
+
+The crate is built as `staticlib` and `rlib`, where it was `staticlib` alone.
+The XCFramework still links the staticlib; the rlib lets another crate depend
+on this one through Cargo. A `rust` CI job runs `cargo test --locked` on the
+pinned compiler and checks that the committed Swift scaffold is what the UDL
+generates.
+
 ## 2026-08-26
 
 ### kidgloves-inc fork: yrs 0.27.4, 53-bit client ids

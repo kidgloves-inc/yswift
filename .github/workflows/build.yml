@@ -52,3 +52,46 @@ jobs:
     #     cd examples
     #     tuist build
 
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Project
+      uses: actions/checkout@v3
+
+    # rust-toolchain.toml pins the compiler and the Apple targets. The Apple
+    # targets are not wanted here: anything that honours the whole file
+    # downloads iOS and macOS rust-std onto a runner that never cross-compiles
+    # to them. So the channel is read out of the file and installed by name,
+    # and every cargo invocation below names it, which keeps these tests on
+    # the compiler the XCFramework is built with.
+    - name: Read the pinned channel
+      id: toolchain
+      run: |
+        CHANNEL=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml","rb"))["toolchain"]["channel"])')
+        echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+    - name: Install the pinned toolchain
+      run: |
+        rustup toolchain install "${{ steps.toolchain.outputs.channel }}" \
+          --profile minimal --no-self-update
+        cargo "+${{ steps.toolchain.outputs.channel }}" --version
+
+    - name: Test the binding
+      run: |
+        cargo "+${{ steps.toolchain.outputs.channel }}" test --locked \
+          --manifest-path lib/Cargo.toml
+
+    # The committed Swift scaffold is what a Swift reader sees between
+    # releases. build-xcframework.sh regenerates it before every release
+    # build; this regenerates it the same way and fails if the committed copy
+    # is not what the UDL produces. (uniffi-bindgen warns that swiftformat is
+    # missing on this runner; the committed copy is unformatted too.)
+    - name: Check the Swift scaffold matches the UDL
+      run: |
+        cargo "+${{ steps.toolchain.outputs.channel }}" run --locked \
+          --manifest-path lib/Cargo.toml --features=uniffi/cli \
+          --bin uniffi-bindgen generate lib/src/yniffi.udl \
+          --language swift --out-dir lib/swift/scaffold
+        git diff --exit-code -- lib/swift/scaffold
