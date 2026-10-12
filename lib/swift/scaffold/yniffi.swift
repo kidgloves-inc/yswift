@@ -853,6 +853,25 @@ public convenience init() {
     }
 
     
+    /**
+     * A document authoring under a caller-chosen client id, optionally keeping
+     * its deleted blocks (`skip_gc`). For tests that have to author under a
+     * particular id, such as the boundaries 2^31, 2^32 and 2^53 - 1; the plain
+     * constructor draws the id itself. Ordinary callers use the plain
+     * constructor: a document's client id is then the core's own draw, which
+     * keeps two peers from sharing one. Refuses an id at or above 2^53: the core
+     * would mask it to a different id without a word, the same silent
+     * re-attribution the u32 client-id truncation in yrs 0.18's V1 decoder caused.
+     */
+public static func withClientId(clientId: UInt64, skipGc: Bool)throws  -> YrsDoc {
+    return try  FfiConverterTypeYrsDoc.lift(try rustCallWithError(FfiConverterTypeYrsDocError.lift) {
+    uniffi_uniffi_yniffi_fn_constructor_yrsdoc_with_client_id(
+        FfiConverterUInt64.lower(clientId),
+        FfiConverterBool.lower(skipGc),$0
+    )
+})
+}
+    
 
     
 open func encodeDiffV1(tx: YrsTransaction, stateVector: [UInt8])throws  -> [UInt8] {
@@ -1396,6 +1415,22 @@ public protocol YrsTransactionProtocol : AnyObject {
     
     func transactionGetText(name: String)  -> YrsText?
     
+    /**
+     * True while the document is holding updates it cannot integrate yet, because
+     * the updates they depend on have not arrived (yrs >= 0.23.3; `ReadTxn::has_missing_updates`
+     * is `store.pending.is_some() || store.pending_ds.is_some()`). A document in this
+     * state accepts edits and renders, so nothing above the core can see it; asking is how
+     * to tell a live document from a stalled one.
+     * See `transaction::tests::a_withheld_dependency_leaves_the_document_missing_updates`.
+     *
+     * A known false positive on yrs 0.27.4: a pending record whose missing clock the
+     * store has already reached is never retried and never cleared, so a document that
+     * agrees with its peers on text and state vector can still answer true. A caller
+     * that treats true as "resync" should bound how often it does. Reported upstream as
+     * y-crdt/y-crdt#670.
+     */
+    func transactionHasMissingUpdates()  -> Bool
+    
     func transactionStateVector()  -> [UInt8]
     
 }
@@ -1516,6 +1551,27 @@ open func transactionGetText(name: String) -> YrsText? {
     return try!  FfiConverterOptionTypeYrsText.lift(try! rustCall() {
     uniffi_uniffi_yniffi_fn_method_yrstransaction_transaction_get_text(self.uniffiClonePointer(),
         FfiConverterString.lower(name),$0
+    )
+})
+}
+    
+    /**
+     * True while the document is holding updates it cannot integrate yet, because
+     * the updates they depend on have not arrived (yrs >= 0.23.3; `ReadTxn::has_missing_updates`
+     * is `store.pending.is_some() || store.pending_ds.is_some()`). A document in this
+     * state accepts edits and renders, so nothing above the core can see it; asking is how
+     * to tell a live document from a stalled one.
+     * See `transaction::tests::a_withheld_dependency_leaves_the_document_missing_updates`.
+     *
+     * A known false positive on yrs 0.27.4: a pending record whose missing clock the
+     * store has already reached is never retried and never cleared, so a document that
+     * agrees with its peers on text and state vector can still answer true. A caller
+     * that treats true as "resync" should bound how often it does. Reported upstream as
+     * y-crdt/y-crdt#670.
+     */
+open func transactionHasMissingUpdates() -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_uniffi_yniffi_fn_method_yrstransaction_transaction_has_missing_updates(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -2271,6 +2327,54 @@ public func FfiConverterTypeYrsDelta_lower(_ value: YrsDelta) -> RustBuffer {
 extension YrsDelta: Equatable, Hashable {}
 
 
+
+
+public enum YrsDocError {
+
+    
+    
+    case ClientIdOutOfRange(message: String)
+    
+}
+
+
+public struct FfiConverterTypeYrsDocError: FfiConverterRustBuffer {
+    typealias SwiftType = YrsDocError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> YrsDocError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .ClientIdOutOfRange(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: YrsDocError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        case .ClientIdOutOfRange(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+
+        
+        }
+    }
+}
+
+
+extension YrsDocError: Equatable, Hashable {}
+
+extension YrsDocError: Error { }
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -3516,6 +3620,9 @@ private var initializationResult: InitializationResult {
     if (uniffi_uniffi_yniffi_checksum_method_yrstransaction_transaction_get_text() != 54845) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_uniffi_yniffi_checksum_method_yrstransaction_transaction_has_missing_updates() != 7916) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_uniffi_yniffi_checksum_method_yrstransaction_transaction_state_vector() != 39028) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3559,6 +3666,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_constructor_yrsdoc_new() != 51551) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_uniffi_yniffi_checksum_constructor_yrsdoc_with_client_id() != 54198) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_yniffi_checksum_method_yrsarrayeachdelegate_call() != 23816) {

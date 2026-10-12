@@ -26,4 +26,6 @@ uniffi = { version = "0.27.1", features = [ "build" ] }
 [lib]
 name = "uniffi_yniffi"
 path = "src/lib.rs"
-crate-type = ["staticlib"]
+# staticlib is what the XCFramework links. rlib is what lets another crate
+# depend on this one through Cargo, which a staticlib alone cannot be.
+crate-type = ["staticlib", "rlib"]

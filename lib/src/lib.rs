@@ -20,6 +20,7 @@ use crate::change::YrsChange;
 use crate::delta::YrsDelta;
 use crate::doc::YrsDoc;
 use crate::error::CodingError;
+use crate::error::YrsDocError;
 use crate::map::YrsMap;
 use crate::map::YrsMapIteratorDelegate;
 use crate::map::YrsMapKVIteratorDelegate;
